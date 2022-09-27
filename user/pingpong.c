@@ -20,6 +20,7 @@ int main(int argc, char *argv[])
         char *str1 = malloc(len * sizeof(char));
         str1 = "ping";
         write(p[1], str1, len);
+        close(p[1]);
         char *str3 = malloc(len * sizeof(char));
         read(p1[0], str3, len);
         printf("%d: received %s\n", getpid(), str3);
