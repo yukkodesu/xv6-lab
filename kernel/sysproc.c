@@ -107,3 +107,26 @@ sys_trace(void)
   myproc()->mask = n;
   return 0;
 }
+
+uint64
+sys_info(void)
+{
+  uint64 addr;
+  struct proc *p = myproc();
+  if (argaddr(0, &addr) < 0)
+    return -1;
+  struct sysinfo
+  {
+    uint64 freemem; // amount of free memory (bytes)
+    uint64 nproc;   // number of process
+    uint64 freefd;  // number of free file descriptor
+  } info;
+  calc_freemem(&(info.freemem));
+  calc_nproc(&(info.nproc));
+  calc_freefd(&(info.freefd));
+  if (copyout(p->pagetable, addr, (char *)&info, sizeof(info)) < 0)
+  {
+    return -1;
+  }
+  return 0;
+}
