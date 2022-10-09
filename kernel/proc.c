@@ -287,7 +287,7 @@ int fork(void)
 
   np->parent = p;
 
-  np->mask = 0;
+  np->mask = p->mask ? p->mask : 0;
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
