@@ -53,7 +53,6 @@ void kfree(void *pa)
   int now_cpuid;
   push_off();
   now_cpuid = cpuid();
-  pop_off();
   struct run *r;
 
   if (((uint64)pa % PGSIZE) != 0 || (char *)pa < end || (uint64)pa >= PHYSTOP)
@@ -68,6 +67,7 @@ void kfree(void *pa)
   r->next = kmems[now_cpuid].freelist;
   kmems[now_cpuid].freelist = r;
   release(&kmems[now_cpuid].lock);
+  pop_off();
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -80,7 +80,6 @@ kalloc(void)
   int now_cpuid;
   push_off();
   now_cpuid = cpuid();
-  pop_off();
   acquire(&kmems[now_cpuid].lock);
   r = kmems[now_cpuid].freelist;
   if (r)
@@ -91,7 +90,7 @@ kalloc(void)
   else
   {
     release(&kmems[now_cpuid].lock);
-    for (int i = 0; i < NCPU; i++)
+    for (int i = (now_cpuid + 1) % NCPU; i != now_cpuid; i = (i + 1) % NCPU)
     {
       acquire(&kmems[i].lock);
       r = kmems[i].freelist;
@@ -105,6 +104,8 @@ kalloc(void)
       break;
     }
   }
+
+  pop_off();
 
   if (r)
     memset((char *)r, 5, PGSIZE); // fill with junk
