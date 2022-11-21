@@ -78,9 +78,8 @@ void ukvmmap(pagetable_t k_pagetable, uint64 va, uint64 pa, uint64 sz,
     panic("ukvmmap");
 }
 
-pagetable_t init_kpgtbl(struct proc *p) {
+pagetable_t init_kpgtbl() {
   pagetable_t k_pagetable = (pagetable_t)uvmcreate();
-  memset(k_pagetable, 0, PGSIZE);
 
   // uart registers
   ukvmmap(k_pagetable, UART0, UART0, PGSIZE, PTE_R | PTE_W);
@@ -106,8 +105,6 @@ pagetable_t init_kpgtbl(struct proc *p) {
   // the highest virtual address in the kernel.
   ukvmmap(k_pagetable, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 
-  // map the kstack physic addr in per-process k_pgtable
-  ukvmmap(k_pagetable, p->kstack, p->kstack_pa, PGSIZE, PTE_R | PTE_W);
   return k_pagetable;
 }
 
@@ -155,14 +152,21 @@ found:
     release(&p->lock);
     return 0;
   }
+  p->k_pagetable = init_kpgtbl();
+  if (p->k_pagetable == 0) {
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
+  // map the kstack physic addr in per-process k_pgtable
+  ukvmmap(p->k_pagetable, p->kstack, p->kstack_pa, PGSIZE, PTE_R | PTE_W);
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
-  p->k_pagetable = init_kpgtbl(p);
 
   return p;
 }
@@ -509,7 +513,7 @@ void scheduler(void) {
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
-
+        kvminithart();
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0; // cpu dosen't run any process now
@@ -520,7 +524,6 @@ void scheduler(void) {
     }
 #if !defined(LAB_FS)
     if (found == 0) {
-      ukvminithart(kernel_pagetable);
       intr_on();
       asm volatile("wfi");
     }
