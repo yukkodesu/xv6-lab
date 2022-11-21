@@ -413,8 +413,7 @@ int test_pagetable() {
   return satp != gsatp;
 }
 
-void vmprint(pagetable_t pagetable) {
-  static int level = 0;
+void vmprint(pagetable_t pagetable, int level) {
   if (level == 0) {
     printf("page table %p\n", pagetable);
   } else if (level > 2) {
@@ -428,9 +427,7 @@ void vmprint(pagetable_t pagetable) {
       }
       uint64 child = PTE2PA(pte);
       printf("%d: pte %p pa %p\n", i, pte, child);
-      level++;
-      vmprint((pagetable_t)child);
-      level--;
+      vmprint((pagetable_t)child, level + 1);
     }
   }
 }
