@@ -119,6 +119,9 @@ int exec(char *path, char **argv) {
     vmprint(p->pagetable, 0);
   }
 
+  u2kvmcopy(pagetable, p->k_pagetable, 0, sz);
+
+
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
 bad:

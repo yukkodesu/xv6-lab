@@ -88,7 +88,7 @@ pagetable_t init_kpgtbl() {
   ukvmmap(k_pagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
 
   // CLINT
-  ukvmmap(k_pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+  // ukvmmap(k_pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
 
   // PLIC
   ukvmmap(k_pagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
@@ -106,6 +106,28 @@ pagetable_t init_kpgtbl() {
   ukvmmap(k_pagetable, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 
   return k_pagetable;
+}
+
+int u2kvmcopy(pagetable_t u, pagetable_t k, uint64 oldsz, uint64 newsz) {
+  pte_t *pte_from, *pte_to;
+  if (newsz >= PLIC)
+    return -1;
+  oldsz = PGROUNDUP(oldsz);
+  uint64 i;
+  for (i = oldsz; i < newsz; i += PGSIZE) {
+    if ((pte_from = walk(u, i, 0)) == 0) {
+      panic("u2kvmcopy: upgtbl err");
+      return -1;
+    }
+    if ((pte_to = walk(k, i, 1)) == 0) {
+      panic("u2kvmcopy: kpgtbl err");
+      return -1;
+    }
+    uint64 pa = PTE2PA(*pte_from);
+    uint flags = (PTE_FLAGS(*pte_from)) & (~PTE_U);
+    *pte_to = PA2PTE(pa) | flags;
+  }
+  return 0;
 }
 
 int allocpid() {
@@ -193,6 +215,8 @@ static void freeproc(struct proc *p) {
   p->trapframe = 0;
   if (p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  if (p->k_pagetable)
+    proc_freewalk(p->k_pagetable);
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -202,8 +226,6 @@ static void freeproc(struct proc *p) {
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
-  if (p->k_pagetable)
-    proc_freewalk(p->k_pagetable);
 }
 
 // Create a user page table for a given process,
@@ -266,6 +288,7 @@ void userinit(void) {
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
+  u2kvmcopy(p->pagetable, p->k_pagetable, 0, p->sz);
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;     // user program counter
   p->trapframe->sp = PGSIZE; // user stack pointer
@@ -286,9 +309,12 @@ int growproc(int n) {
 
   sz = p->sz;
   if (n > 0) {
+    if (PGROUNDUP(sz + n) >= PLIC)
+      return -1;
     if ((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+    u2kvmcopy(p->pagetable, p->k_pagetable, sz - n, sz);
   } else if (n < 0) {
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
@@ -315,6 +341,11 @@ int fork(void) {
     return -1;
   }
   np->sz = p->sz;
+  if (u2kvmcopy(np->pagetable, np->k_pagetable, 0, np->sz) < 0) {
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
 
   np->parent = p;
 
@@ -481,8 +512,8 @@ int wait(uint64 addr) {
   }
 }
 
-void ukvminithart(pagetable_t k_pagetable) {
-  w_satp(MAKE_SATP(k_pagetable));
+void ukvminithart(pagetable_t pgtbl) {
+  w_satp(MAKE_SATP(pgtbl));
   sfence_vma();
 }
 
@@ -509,6 +540,7 @@ void scheduler(void) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
+        // printf("swtch to %d\n", p->pid);
         ukvminithart(p->k_pagetable);
         p->state = RUNNING;
         c->proc = p;
