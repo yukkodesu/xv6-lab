@@ -301,6 +301,18 @@ void userinit(void) {
   release(&p->lock);
 }
 
+uint64 ukvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz) {
+  if (newsz >= oldsz)
+    return oldsz;
+
+  if (PGROUNDUP(newsz) < PGROUNDUP(oldsz)) {
+    int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    uvmunmap(pagetable, PGROUNDUP(newsz), npages, 0);
+  }
+
+  return newsz;
+}
+
 // Grow or shrink user memory by n bytes.
 // Return 0 on success, -1 on failure.
 int growproc(int n) {
@@ -316,7 +328,9 @@ int growproc(int n) {
     }
     u2kvmcopy(p->pagetable, p->k_pagetable, sz - n, sz);
   } else if (n < 0) {
+    uint oldsz = sz;
     sz = uvmdealloc(p->pagetable, sz, sz + n);
+    ukvmdealloc(p->k_pagetable, oldsz, sz);
   }
   p->sz = sz;
   return 0;
